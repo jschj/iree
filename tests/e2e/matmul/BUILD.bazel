@@ -216,11 +216,7 @@ X86_64_AVX512_BF16 = X86_64_AVX512 + [
     generator_args = [
         "--lhs_rhs_type=%s" % lhs_rhs_type,
         "--acc_type=%s" % acc_type,
-        # `easy_large_static` is a small set of M=N=512, K=128 cases. The
-        # narrow-N (`transposed_intrinsic = true`) and large-K shapes are
-        # follow-up commits that lift this restriction.
-        "--shapes=easy_large_static",
-    ],
+    ] + (["--shapes=small"] if acc_type == "f64" else []),
     tags = ([
         # f16/bf16 trigger internal LLVM assertion errors on riscv and wasm.
         "noriscv",
