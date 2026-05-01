@@ -980,8 +980,23 @@ SmallVector<VirtualMMAIntrinsic> MMAAttr::getVirtualIntrinsics() const {
     return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x64x1_F16};
   case MMAIntrinsic::MFMA_F32_16x16x32_BF16:
     return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x64x1_BF16};
+  case MMAIntrinsic::MFMA_F32_16x16x32_F8E5M2FNUZ:
+    return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x2_F8E5M2FNUZ};
+  case MMAIntrinsic::MFMA_F32_16x16x32_F8E5M2FNUZ_F8E4M3FNUZ:
+    return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x2_F8E5M2FNUZ_F8E4M3FNUZ};
+  case MMAIntrinsic::MFMA_F32_16x16x32_F8E4M3FNUZ_F8E5M2FNUZ:
+    return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x2_F8E4M3FNUZ_F8E5M2FNUZ};
   case MMAIntrinsic::MFMA_F32_16x16x32_F8E4M3FNUZ:
-    return {VirtualMMAIntrinsic::VMFMA_F32_16x16x32_F8E4M3FNUZ};
+    return {VirtualMMAIntrinsic::VMFMA_F32_16x16x32_F8E4M3FNUZ,
+            VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x2_F8E4M3FNUZ};
+  case MMAIntrinsic::MFMA_F32_16x16x128_F8E5M2:
+    return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x1_F8E5M2};
+  case MMAIntrinsic::MFMA_F32_16x16x128_F8E5M2_F8E4M3FN:
+    return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x1_F8E5M2_F8E4M3FN};
+  case MMAIntrinsic::MFMA_F32_16x16x128_F8E4M3FN_F8E5M2:
+    return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x1_F8E4M3FN_F8E5M2};
+  case MMAIntrinsic::MFMA_F32_16x16x128_F8E4M3FN:
+    return {VirtualMMAIntrinsic::VDMFMA_F32_8x16x128x1_F8E4M3FN};
   case MMAIntrinsic::MFMA_F32_32x32x16_F8E4M3FNUZ:
     return {VirtualMMAIntrinsic::VMFMA_F32_32x32x16_F8E4M3FNUZ};
   default:
@@ -1816,18 +1831,16 @@ static Value createLaneParityPredicate(OpBuilder &builder, Location loc) {
 // gfx950 16-bit / gfx942 8-bit (k=64): vector<2xi16>, 4 groups per i16.
 // gfx950 8-bit (k=128): i32 scalar, 8 groups packed into 32 bits.
 //
-// For vector types, only the first element carries active selector bits;
-// remaining elements are padding zeros.
+// For vector types, broadcast the selector bits across all elements.
 static Value createConstSparseIndex(OpBuilder &builder, Location loc,
                                     Type sparseIndexType,
                                     uint32_t selectorBits) {
   if (auto vecTy = dyn_cast<VectorType>(sparseIndexType)) {
     Type elemTy = vecTy.getElementType();
-    Value zero =
-        arith::ConstantOp::create(builder, loc, builder.getZeroAttr(vecTy));
-    Value selector = arith::ConstantOp::create(
-        builder, loc, builder.getIntegerAttr(elemTy, selectorBits));
-    return vector::InsertOp::create(builder, loc, selector, zero, 0);
+    return arith::ConstantOp::create(
+        builder, loc,
+        SplatElementsAttr::get(vecTy,
+                               builder.getIntegerAttr(elemTy, selectorBits)));
   }
   return arith::ConstantOp::create(
       builder, loc, builder.getIntegerAttr(sparseIndexType, selectorBits));
