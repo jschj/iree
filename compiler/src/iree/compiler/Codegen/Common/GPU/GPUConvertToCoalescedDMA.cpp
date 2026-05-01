@@ -288,19 +288,22 @@ static bool isValidPadForDMA(tensor::PadOp pad) {
     return false;
   }
 
-  // Check if source tensor's innermost row size is DWORD (4-byte) aligned. On
-  // AMD CDNA, per-component range checking is performed for each DWORD. If a
-  // DWORD is partially out-of-bounds, the entire DWORD returns zero, causing
-  // incorrect results. Additionally, partial OOB triggers the slow path with
-  // multi-cycling and instruction issue penalties.
-  auto sourceType = cast<RankedTensorType>(pad.getSource().getType());
-  int64_t innermostDim = sourceType.getShape().back();
-  if (ShapedType::isDynamic(innermostDim)) {
-    return false;
-  }
-  Type elemType = sourceType.getElementType();
-  int64_t rowBytes = innermostDim * (elemType.getIntOrFloatBitWidth() / 8);
-  return rowBytes % 4 == 0;
+  // Note on DWORD-aligned source rows: AMD CDNA HW does per-DWORD range
+  // checking on buffer loads, with two failure modes when the source row
+  // size is not DWORD-aligned:
+  //   1. Per-lane straddle DWORDs read from the *next* source row, writing
+  //      garbage to LDS innermost columns.
+  //   2. The straddle DWORD on the *last* source row crosses the buffer end;
+  //      HW zeros the entire DWORD, destroying valid bytes inside it.
+  //
+  // GPUPushDownDMABoundsToConsumers handles both:
+  //   - For (1) it inserts a tensor.pad on the LDS tile, masking garbage
+  //     columns at the consumer's vector.transfer_read.
+  //   - For (2) it wraps the source with iree_gpu.buffer_resource_cast that
+  //     overrides validBytes to a DWORD-rounded value, keeping the trailing
+  //     partial DWORD in-bounds so its valid bytes are preserved.
+  // Together these make non-DWORD-aligned source rows safe for DMA.
+  return true;
 }
 
 /// Check if a linalg.copy is viable for DMA conversion based on alignment,
